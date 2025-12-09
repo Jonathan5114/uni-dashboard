@@ -25,7 +25,7 @@ import streamlit as st
 # Benutzer + Passwörter definieren
 VALID_USERS = {
     "jonathan": "IchBinJon",
-    "annalena": "IchBinAnn",
+    "Anna-Lena": "IchBinAnn",
     "lara": "IchBinLara",
 }
 

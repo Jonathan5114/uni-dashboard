@@ -16,32 +16,32 @@ from io import BytesIO
 
 import streamlit as st
 
+# -------------------------------------------------
+# 🔒 LOGIN-SCHUTZ
+# -------------------------------------------------
+
+import streamlit as st
+
 # Benutzer + Passwörter definieren
 VALID_USERS = {
     "jonathan": "IchBinJon",
     "annalena": "IchBinAnn",
     "lara": "IchBinLara",
-    "Gast": "Gast",
 }
 
 # Login-Funktion
 def login_page():
     st.title("🔐 Login – Uni-Dashboard")
 
-    username = st.text_input("Benutzername").strip()
+    username = st.text_input("Benutzername")
     password = st.text_input("Passwort", type="password")
 
     if st.button("Einloggen"):
-        # WICHTIG: Passwort des eingegebenen Benutzers vergleichen,
-        # nicht fest "jonathan" oder ähnliches!
         if username in VALID_USERS and VALID_USERS[username] == password:
             st.session_state["logged_in"] = True
-            st.session_state["username"] = username
-            if username in VALID_USERS and VALID_USERS[username] == password:
-                st.session_state["logged_in"] = True
-                st.session_state["username"] = username
-                st.rerun()  # statt st.experimental_rerun()
-
+            st.session_state["user"] = username   # 👈 Nutzername für persönlichen Ordner
+            st.success("Erfolgreich eingeloggt! 🎉")
+            st.rerun()
         else:
             st.error("❌ Benutzername oder Passwort falsch")
 
@@ -55,21 +55,65 @@ if not st.session_state["logged_in"]:
     login_page()
     st.stop()  # verhindert, dass der Rest der App geladen wird
 
+# -------------------------------------------------
+# 👋 Begrüßungsbanner mit Tageszeit
+# -------------------------------------------------
+
+# EINGELOGGTEN BENUTZER LADEN
+user = st.session_state.get("user", "Unbekannt")
+welcome_name = user.capitalize()
+
+# Tageszeit bestimmen
+hour = datetime.now().hour
+
+if hour < 11:
+    greeting = "🌅 Guten Morgen"
+elif hour < 17:
+    greeting = "☀️ Guten Tag"
+else:
+    greeting = "🌙 Guten Abend"
+
+# Banner anzeigen
+st.markdown(
+    f"""
+    <div style='
+        background-color:#f0f2f6;
+        padding:18px;
+        border-radius:12px;
+        margin-bottom:20px;
+        border-left: 6px solid #4a90e2;
+        font-size:20px;
+    '>
+        <b>{greeting}, {welcome_name} – Willkommen zurück! 👋</b>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 
 # -------------------------------------------------
-# Pfade / Dateien
+# Nutzerabhängige Datenpfade
 # -------------------------------------------------
 
-DATA_DIR = "data"
-STUNDENPLAN_FILE = os.path.join(DATA_DIR, "stundenplan.csv")
-KLAUSUREN_FILE = os.path.join(DATA_DIR, "klausuren.csv")
-TODOS_FILE = os.path.join(DATA_DIR, "todos.json")
-MOOD_FILE = os.path.join(DATA_DIR, "mood.csv")
-SEMINARE_FILE = os.path.join(DATA_DIR, "seminare.csv")
-LERNPLAN_FILE = os.path.join(DATA_DIR, "lernplan.csv")
+BASE_DATA_DIR = "data"
 
+def get_user_data_dir():
+    """
+    Gibt den persönlichen Datenordner des eingeloggten Users zurück,
+    z.B. data/jonathan oder data/person1.
+    """
+    user = st.session_state.get("user", "default")
+    path = os.path.join(BASE_DATA_DIR, user)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def user_file(name: str) -> str:
+    """
+    Hilfsfunktion: gibt den Pfad zu einer Datei im User-Ordner zurück.
+    Beispiel: user_file("klausuren.csv") -> data/<user>/klausuren.csv
+    """
+    return os.path.join(get_user_data_dir(), name)
 
 # -------------------------------------------------
 # Hilfsfunktionen allgemein
@@ -110,11 +154,13 @@ def open_path_or_url(path: str):
 # -------------------------------------------------
 
 def load_stundenplan():
-    if not os.path.exists(STUNDENPLAN_FILE):
+    path = user_file("stundenplan.csv")
+
+    if not os.path.exists(path):
         return pd.DataFrame(columns=["datum", "zeit", "fach", "raum"])
 
     try:
-        df = pd.read_csv(STUNDENPLAN_FILE, sep=None, engine="python")
+        df = pd.read_csv(path, sep=None, engine="python")
     except Exception:
         return pd.DataFrame(columns=["datum", "zeit", "fach", "raum"])
 
@@ -125,19 +171,22 @@ def load_stundenplan():
     return df
 
 
+
 # -------------------------------------------------
 # Klausuren-Funktionen (+ Lernfortschritt)
 # -------------------------------------------------
 
 def load_klausuren():
-    if not os.path.exists(KLAUSUREN_FILE):
+    path = user_file("klausuren.csv")
+
+    if not os.path.exists(path):
         return pd.DataFrame(columns=[
             "fach", "datum", "lernordner", "tage_vorher",
             "archiviert", "note", "ziel_stunden", "gelernt_stunden"
         ])
 
     try:
-        df = pd.read_csv(KLAUSUREN_FILE, sep=None, engine="python")
+        df = pd.read_csv(path, sep=None, engine="python")
     except Exception:
         return pd.DataFrame(columns=[
             "fach", "datum", "lernordner", "tage_vorher",
@@ -169,12 +218,13 @@ def load_klausuren():
 
 
 def save_klausuren(df):
-    os.makedirs(DATA_DIR, exist_ok=True)
+    path = user_file("klausuren.csv")
     out = df.copy()
     out["datum"] = pd.to_datetime(out["datum"], errors="coerce").dt.strftime("%Y-%m-%d")
     cols = ["fach", "datum", "lernordner", "tage_vorher",
             "archiviert", "note", "ziel_stunden", "gelernt_stunden"]
-    out[cols].to_csv(KLAUSUREN_FILE, index=False)
+    out[cols].to_csv(path, index=False)
+
 
 
 def compute_exam_risk(row, today):
@@ -214,11 +264,13 @@ def compute_exam_risk(row, today):
 # -------------------------------------------------
 
 def load_todos():
-    if not os.path.exists(TODOS_FILE):
+    path = user_file("todos.json")
+
+    if not os.path.exists(path):
         return []
 
     try:
-        with open(TODOS_FILE, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
         return []
@@ -238,9 +290,11 @@ def load_todos():
 
 
 def save_todos(todos):
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(TODOS_FILE, "w", encoding="utf-8") as f:
+    path = user_file("todos.json")
+    os.makedirs(get_user_data_dir(), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(todos, f, ensure_ascii=False, indent=2)
+
 
 
 # -------------------------------------------------
@@ -279,10 +333,12 @@ def extract_text_from_file(uploaded_file):
 # -------------------------------------------------
 
 def load_mood():
-    if not os.path.exists(MOOD_FILE):
+    path = user_file("mood.csv")
+
+    if not os.path.exists(path):
         return pd.DataFrame(columns=["datum", "stimmung", "stress", "schlaf", "notiz"])
     try:
-        df = pd.read_csv(MOOD_FILE)
+        df = pd.read_csv(path)
     except Exception:
         return pd.DataFrame(columns=["datum", "stimmung", "stress", "schlaf", "notiz"])
     if "datum" in df.columns:
@@ -291,11 +347,13 @@ def load_mood():
 
 
 def save_mood(df):
-    os.makedirs(DATA_DIR, exist_ok=True)
+    path = user_file("mood.csv")
+    os.makedirs(get_user_data_dir(), exist_ok=True)
     out = df.copy()
     if "datum" in out.columns:
         out["datum"] = pd.to_datetime(out["datum"], errors="coerce").dt.strftime("%Y-%m-%d")
-    out.to_csv(MOOD_FILE, index=False)
+    out.to_csv(path, index=False)
+
 
 
 # -------------------------------------------------
@@ -303,10 +361,12 @@ def save_mood(df):
 # -------------------------------------------------
 
 def load_seminare():
-    if not os.path.exists(SEMINARE_FILE):
+    path = user_file("seminare.csv")
+
+    if not os.path.exists(path):
         return pd.DataFrame(columns=["titel", "datum", "ort", "punkte", "absolviert"])
     try:
-        df = pd.read_csv(SEMINARE_FILE)
+        df = pd.read_csv(path)
     except Exception:
         return pd.DataFrame(columns=["titel", "datum", "ort", "punkte", "absolviert"])
 
@@ -326,10 +386,12 @@ def load_seminare():
 
 
 def save_seminare(df):
-    os.makedirs(DATA_DIR, exist_ok=True)
+    path = user_file("seminare.csv")
+    os.makedirs(get_user_data_dir(), exist_ok=True)
     out = df.copy()
     out["datum"] = pd.to_datetime(out["datum"], errors="coerce").dt.strftime("%Y-%m-%d")
-    out.to_csv(SEMINARE_FILE, index=False)
+    out.to_csv(path, index=False)
+
 
 
 # -------------------------------------------------
@@ -337,10 +399,12 @@ def save_seminare(df):
 # -------------------------------------------------
 
 def load_lernplan():
-    if not os.path.exists(LERNPLAN_FILE):
+    path = user_file("lernplan.csv")
+
+    if not os.path.exists(path):
         return pd.DataFrame(columns=["fach", "stunden_pro_woche", "priorität"])
     try:
-        df = pd.read_csv(LERNPLAN_FILE)
+        df = pd.read_csv(path)
     except Exception:
         return pd.DataFrame(columns=["fach", "stunden_pro_woche", "priorität"])
 
@@ -357,9 +421,11 @@ def load_lernplan():
 
 
 def save_lernplan(df):
-    os.makedirs(DATA_DIR, exist_ok=True)
+    path = user_file("lernplan.csv")
+    os.makedirs(get_user_data_dir(), exist_ok=True)
     out = df.copy()
-    out.to_csv(LERNPLAN_FILE, index=False)
+    out.to_csv(path, index=False)
+
 
 
 # -------------------------------------------------
@@ -1299,4 +1365,3 @@ elif page == "Mood-Tracker & Stressradar":
             st.success("Alles im grünen Bereich – gute Voraussetzungen fürs Lernen! 💪")
     else:
         st.info("Noch keine Mood-Daten vorhanden. Mach oben deinen ersten Eintrag.")
-

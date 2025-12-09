@@ -19,23 +19,29 @@ import streamlit as st
 # Benutzer + Passwörter definieren
 VALID_USERS = {
     "jonathan": "IchBinJon",
-    "AnnaLena": "IchBinAnni",
-    "person2": "xyz789",
+    "annalena": "IchBinAnn",
+    "lara": "IchBinLara",
+    "Gast": "Gast",
 }
 
 # Login-Funktion
 def login_page():
     st.title("🔐 Login – Uni-Dashboard")
 
-    username = st.text_input("Benutzername")
+    username = st.text_input("Benutzername").strip()
     password = st.text_input("Passwort", type="password")
 
     if st.button("Einloggen"):
+        # WICHTIG: Passwort des eingegebenen Benutzers vergleichen,
+        # nicht fest "jonathan" oder ähnliches!
         if username in VALID_USERS and VALID_USERS[username] == password:
             st.session_state["logged_in"] = True
-            st.session_state["user"] = username
-            st.success("Erfolgreich eingeloggt! 🎉")
-            st.rerun()  # <-- funktioniert in allen neuen Streamlit-Versionen
+            st.session_state["username"] = username
+            if username in VALID_USERS and VALID_USERS[username] == password:
+                st.session_state["logged_in"] = True
+                st.session_state["username"] = username
+                st.rerun()  # statt st.experimental_rerun()
+
         else:
             st.error("❌ Benutzername oder Passwort falsch")
 
@@ -1293,3 +1299,4 @@ elif page == "Mood-Tracker & Stressradar":
             st.success("Alles im grünen Bereich – gute Voraussetzungen fürs Lernen! 💪")
     else:
         st.info("Noch keine Mood-Daten vorhanden. Mach oben deinen ersten Eintrag.")
+

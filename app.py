@@ -9,6 +9,8 @@ import webbrowser
 import PyPDF2
 from docx import Document
 from io import BytesIO
+import streamlit.components.v1 as components
+
 
 # -------------------------------------------------
 # 🔒 LOGIN-SCHUTZ
@@ -517,17 +519,26 @@ if page == "Tagesübersicht":
         if not sem_today.empty:
             st.write("**Heutige Seminare:**")
             for _, row in sem_today.iterrows():
-                st.write(f"- {row['titel']} ({row['ort']}) – {row['punkte']} Punkte")
+                info = row["titel"]
+                if row.get("uhrzeit1", ""):
+                    info += f" – {row['uhrzeit1']}"
+                if row.get("notiz", "").strip():
+                    info += f" ({row['notiz']})"
+                info += f" – {row['punkte']} Punkte"
+                st.write(f"- {info}")
         else:
             sem_next = seminare[pd.notna(seminare["datum"])]
             sem_next = sem_next[sem_next["datum"] > today].sort_values("datum")
             if not sem_next.empty:
                 nxt = sem_next.iloc[0]
+                text = f"{nxt['titel']} am {nxt['datum'].strftime('%d.%m.%Y')}"
+                if nxt.get("uhrzeit1", ""):
+                    text += f", {nxt['uhrzeit1']}"
+                if nxt.get("notiz", "").strip():
+                    text += f" ({nxt['notiz']})"
+                text += f" – {nxt['punkte']} Punkte"
                 st.write("**Nächstes Seminar:**")
-                st.write(
-                    f"{nxt['titel']} am {nxt['datum'].strftime('%d.%m.%Y')} "
-                    f"({nxt['ort']}) – {nxt['punkte']} Punkte"
-                )
+                st.write(text)
             else:
                 st.write("Keine Seminare eingetragen.")
 
@@ -736,52 +747,105 @@ if page == "Tagesübersicht":
 
 
 # -------------------------------------------------
-# 1️⃣ STUNDENPLAN
+# 1️⃣ STUNDENPLAN – HTML mit Scrollbalken + Speichern
 # -------------------------------------------------
 
 elif page == "Stundenplan":
-    st.title("📅 Stundenplan")
+    st.title("📅 Stundenplan (HTML)")
 
-    if stundenplan.empty:
-        st.info("Noch kein Stundenplan eingetragen.")
+    st.markdown(
+        "Hier kannst du deinen Stundenplan als **HTML-Datei** anzeigen.\n\n"
+        "- Gespeicherte Version wird automatisch geladen\n"
+        "- Du kannst eine neue HTML-Datei hochladen\n"
+        "- Es gibt Scrollbalken nach **unten** und **rechts**, damit nichts abgeschnitten wird\n"
+        "- Mit einem Speicher-Button wird der Stundenplan für deinen Nutzer gesichert"
+    )
+
+    # Feste Größe für den Frame (Scrollbalken kommen automatisch)
+    FRAME_HEIGHT = 800
+    FRAME_WIDTH = 1200  # falls immer noch was abgeschnitten ist: z.B. 1400 machen
+
+    html_loaded = False
+    html_content = ""
+
+    # Pfad für benutzerspezifische Datei
+    user_html_path = user_file("stundenplan.html")
+
+    # 1️⃣ Gespeicherte Nutzer-Datei laden (data/<user>/stundenplan.html)
+    if os.path.exists(user_html_path):
+        try:
+            with open(user_html_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+            html_loaded = True
+            st.success("Gespeicherten Stundenplan für diesen Benutzer geladen ✅")
+        except Exception as e:
+            st.error(f"Fehler beim Lesen der gespeicherten Datei: {e}")
+
+    # 2️⃣ Optional: Globale Datei im Projektordner als Fallback
+    if not html_loaded and os.path.exists("stundenplan.html"):
+        try:
+            with open("stundenplan.html", "r", encoding="utf-8") as f:
+                html_content = f.read()
+            html_loaded = True
+            st.info("Globale Datei `stundenplan.html` im Projektordner geladen.")
+        except Exception as e:
+            st.error(f"Fehler beim Lesen der globalen Datei: {e}")
+
+    # 3️⃣ Anzeige des aktuell geladenen Stundenplans
+    if html_loaded:
+        st.markdown("### 🔍 Aktuell gespeicherter Stundenplan")
+        components.html(
+            html_content,
+            height=FRAME_HEIGHT,
+            width=FRAME_WIDTH,
+            scrolling=True,  # Scrollbalken für oben/unten + links/rechts
+        )
+
+    st.markdown("---")
+    st.subheader("📤 Neuen HTML-Stundenplan hochladen")
+
+    uploaded_html = st.file_uploader(
+        "HTML-Datei auswählen (z.B. aus dem Uni-Portal exportiert):",
+        type=["html", "htm"]
+    )
+
+    # Wir puffern den Inhalt in session_state, damit der Button danach noch drauf zugreifen kann
+    if uploaded_html is not None:
+        if (
+            "stundenplan_html_upload" not in st.session_state
+            or st.session_state.get("stundenplan_html_upload_name") != uploaded_html.name
+        ):
+            # nur einmal einlesen
+            html_text = uploaded_html.read().decode("utf-8", errors="ignore")
+            st.session_state["stundenplan_html_upload"] = html_text
+            st.session_state["stundenplan_html_upload_name"] = uploaded_html.name
+
+        html_upload_content = st.session_state["stundenplan_html_upload"]
+
+        st.success(f"Neue HTML-Datei `{uploaded_html.name}` geladen ✅")
+
+        st.markdown("### 🧾 Vorschau der hochgeladenen Datei")
+        components.html(
+            html_upload_content,
+            height=FRAME_HEIGHT,
+            width=FRAME_WIDTH,
+            scrolling=True,
+        )
+
+        # 💾 Speicher-Button
+        if st.button("💾 Diesen Stundenplan für meinen Account speichern"):
+            try:
+                os.makedirs(get_user_data_dir(), exist_ok=True)
+                with open(user_html_path, "w", encoding="utf-8") as f:
+                    f.write(html_upload_content)
+                st.success("Stundenplan wurde gespeichert und wird beim nächsten Mal automatisch geladen ✅")
+            except Exception as e:
+                st.error(f"Fehler beim Speichern der Datei: {e}")
     else:
-        ansicht = st.radio("Ansicht", ["Heute", "Aktuelle Woche", "Nächste 7 Tage"])
+        st.info("Lade eine neue HTML-Datei hoch, um sie anzuschauen oder zu speichern.")
 
-        week_start = today - timedelta(days=today.weekday())
-        week_end = week_start + timedelta(days=6)
 
-        if ansicht == "Heute":
-            df = stundenplan[stundenplan["datum"] == today]
-            st.subheader(today.strftime("%A, %d.%m.%Y"))
-            if df.empty:
-                st.success("Heute keine Veranstaltungen 🎉")
-            else:
-                st.table(df)
 
-        elif ansicht == "Aktuelle Woche":
-            df = stundenplan[
-                (stundenplan["datum"] >= week_start) & (stundenplan["datum"] <= week_end)
-            ]
-            st.subheader(f"Woche: {week_start} – {week_end}")
-            if df.empty:
-                st.info("Diese Woche keine Veranstaltungen.")
-            else:
-                for d, group in df.groupby("datum"):
-                    st.markdown(f"### {d.strftime('%A, %d.%m.%Y')}")
-                    st.table(group)
-
-        else:
-            end = today + timedelta(days=7)
-            df = stundenplan[
-                (stundenplan["datum"] >= today) & (stundenplan["datum"] <= end)
-            ]
-            st.subheader(f"Nächste 7 Tage ({today} – {end})")
-            if df.empty:
-                st.info("Keine Veranstaltungen.")
-            else:
-                for d, group in df.groupby("datum"):
-                    st.markdown(f"### {d.strftime('%A, %d.%m.%Y')}")
-                    st.table(group)
 
 
 # -------------------------------------------------
@@ -976,7 +1040,7 @@ elif page == "To-Do & Hausaufgaben":
 
 
 # -------------------------------------------------
-# 4️⃣ SEMINARE & PUNKTE
+# 4️⃣ SEMINARE & PUNKTE – mit zwei Terminen + Notiz
 # -------------------------------------------------
 
 elif page == "Seminare & Punkte":
@@ -1002,18 +1066,63 @@ elif page == "Seminare & Punkte":
         st.info("Trage unten dein erstes Seminar ein.")
     else:
         delete_idx = None
+
+        # nach erstem Datum sortieren
         for idx, row in seminare.sort_values("datum", na_position="last").iterrows():
             st.markdown("---")
             c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
 
             with c1:
                 st.write(f"**Titel:** {row['titel']}")
-                if pd.notna(row["datum"]):
-                    st.write(f"**Datum:** {row['datum'].strftime('%d.%m.%Y')}")
-                else:
-                    st.write("**Datum:** -")
-                st.write(f"**Ort:** {row['ort']}")
 
+                # Termin 1
+                if pd.notna(row["datum"]):
+                    line1 = row["datum"].strftime("%d.%m.%Y")
+                    if row.get("uhrzeit1", ""):
+                        line1 += f", {row['uhrzeit1']}"
+                    st.write(f"**Termin 1:** {line1}")
+                else:
+                    st.write("**Termin 1:** -")
+
+                # Termin 2 (optional + robust)
+                datum2_val = row.get("datum2", None)
+
+                if pd.notna(datum2_val) and str(datum2_val).strip() != "":
+                    # versuchen, in ein Datum zu konvertieren
+                    if isinstance(datum2_val, (datetime, pd.Timestamp)):
+                        d2_str = datum2_val.strftime("%d.%m.%Y")
+                    else:
+                        try:
+                            d2_parsed = pd.to_datetime(datum2_val, errors="coerce")
+                            if pd.isna(d2_parsed):
+                                # wenn es sich gar nicht parsen lässt, einfach Roh-String anzeigen
+                                d2_str = str(datum2_val)
+                            else:
+                                d2_str = d2_parsed.strftime("%d.%m.%Y")
+                        except Exception:
+                            d2_str = str(datum2_val)
+
+                    if row.get("uhrzeit2", ""):
+                        d2_str += f", {row['uhrzeit2']}"
+
+                    st.write(f"**Termin 2:** {d2_str}")
+
+                # Notiz statt „Ort / Anbieter“
+                notiz_val = row.get("notiz", "")
+
+                if notiz_val is None:
+                    notiz_val = ""
+
+                # sicher zu String umwandeln
+                notiz_str = str(notiz_val).strip()
+
+                if notiz_str:
+                    st.write(f"**Notiz:** {notiz_str}")
+                else:
+                    st.write("**Notiz:** -")
+
+                    st.write(f"**Notiz:** {row['notiz']}")
+                
             with c2:
                 punkte_val = st.number_input(
                     "Punkte",
@@ -1046,9 +1155,36 @@ elif page == "Seminare & Punkte":
     st.subheader("➕ Neues Seminar hinzufügen")
 
     new_titel = st.text_input("Titel des Seminars")
-    new_datum = st.date_input("Datum des Seminars", value=today)
-    new_ort = st.text_input("Ort / Anbieter")
-    new_punkte = st.number_input("Punkte (z. B. ECTS/ETC)", min_value=0.0, max_value=30.0, step=0.5, value=0.0)
+
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        new_datum = st.date_input("Datum – Termin 1", value=today)
+    with col_d2:
+        new_uhrzeit1 = st.text_input("Uhrzeit – Termin 1 (z.B. 10:00–12:00)", value="")
+
+    second_day = st.checkbox("Seminar hat einen zweiten Termin (z.B. an zwei Tagen)?", value=False)
+
+    new_datum2 = None
+    new_uhrzeit2 = ""
+    if second_day:
+        col_d3, col_d4 = st.columns(2)
+        with col_d3:
+            new_datum2 = st.date_input("Datum – Termin 2", value=today)
+        with col_d4:
+            new_uhrzeit2 = st.text_input("Uhrzeit – Termin 2", value="")
+
+    new_notiz = st.text_area(
+        "Notiz (z.B. Raum, Gebäude, Online-Link, Anbieter, Sonstiges)",
+        value="",
+    )
+
+    new_punkte = st.number_input(
+        "Punkte (z. B. ECTS/ETC)",
+        min_value=0.0,
+        max_value=30.0,
+        step=0.5,
+        value=0.0,
+    )
     new_done = st.checkbox("Bereits absolviert?", value=False)
 
     if st.button("Seminar speichern"):
@@ -1058,7 +1194,10 @@ elif page == "Seminare & Punkte":
             new_row = {
                 "titel": new_titel.strip(),
                 "datum": new_datum,
-                "ort": new_ort.strip(),
+                "uhrzeit1": new_uhrzeit1.strip(),
+                "datum2": new_datum2 if second_day else pd.NaT,
+                "uhrzeit2": new_uhrzeit2.strip() if second_day else "",
+                "notiz": new_notiz.strip(),
                 "punkte": float(new_punkte),
                 "absolviert": bool(new_done),
             }
@@ -1066,6 +1205,7 @@ elif page == "Seminare & Punkte":
             save_seminare(seminare)
             st.success("Seminar hinzugefügt.")
             safe_rerun()
+
 
 
 # -------------------------------------------------
@@ -1499,6 +1639,43 @@ elif page == "Mood-Tracker & Stressradar":
 
             st.markdown("### Letzte Einträge")
             st.dataframe(last_days.tail(20))
+
+        # 🔻 NEU: Eintrag löschen
+        st.markdown("---")
+        st.subheader("🗑️ Falschen Eintrag löschen")
+
+        # Kopie mit Original-Index merken, damit wir genau den richtigen Eintrag löschen können
+        mood_df_sorted = mood_df.sort_values("datum", ascending=False).reset_index()
+        mood_df_sorted = mood_df_sorted.rename(columns={"index": "orig_index"})
+
+        # Auswahl-Liste bauen
+        options = [
+            f"{row['datum'].strftime('%d.%m.%Y')} – Stimmung: {row['stimmung']}/10, "
+            f"Stress: {row['stress']}/10, Schlaf: {row['schlaf']}h"
+            for _, row in mood_df_sorted.iterrows()
+        ]
+
+        selected_label = st.selectbox(
+            "Eintrag auswählen, der gelöscht werden soll:",
+            ["(kein Eintrag ausgewählt)"] + options,
+        )
+
+        if selected_label != "(kein Eintrag ausgewählt)":
+            # herausfinden, welche Zeile in mood_df_sorted das ist
+            selected_idx = options.index(selected_label)
+            row_to_delete = mood_df_sorted.iloc[selected_idx]
+
+            st.warning(
+                f"Du bist dabei, den Eintrag vom "
+                f"{row_to_delete['datum'].strftime('%d.%m.%Y')} zu löschen."
+            )
+
+            if st.button("❌ Ausgewählten Eintrag wirklich löschen"):
+                orig_index = int(row_to_delete["orig_index"])
+                mood_df = mood_df.drop(index=orig_index).reset_index(drop=True)
+                save_mood(mood_df)
+                st.success("Eintrag wurde gelöscht.")
+                safe_rerun()
 
         st.markdown("---")
         st.subheader("🧠 Analyse & Hinweise")

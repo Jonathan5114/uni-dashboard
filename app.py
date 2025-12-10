@@ -14,14 +14,6 @@ from io import BytesIO
 # 🔒 LOGIN-SCHUTZ
 # -------------------------------------------------
 
-import streamlit as st
-
-# -------------------------------------------------
-# 🔒 LOGIN-SCHUTZ
-# -------------------------------------------------
-
-import streamlit as st
-
 # Benutzer + Passwörter definieren
 VALID_USERS = {
     "jonathan": "IchBinJon",
@@ -89,8 +81,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-
 
 # -------------------------------------------------
 # Nutzerabhängige Datenpfade
@@ -171,7 +161,6 @@ def load_stundenplan():
     return df
 
 
-
 # -------------------------------------------------
 # Klausuren-Funktionen (+ Lernfortschritt)
 # -------------------------------------------------
@@ -224,7 +213,6 @@ def save_klausuren(df):
     cols = ["fach", "datum", "lernordner", "tage_vorher",
             "archiviert", "note", "ziel_stunden", "gelernt_stunden"]
     out[cols].to_csv(path, index=False)
-
 
 
 def compute_exam_risk(row, today):
@@ -296,7 +284,6 @@ def save_todos(todos):
         json.dump(todos, f, ensure_ascii=False, indent=2)
 
 
-
 # -------------------------------------------------
 # Datei-Extraktion für Lernzettel
 # -------------------------------------------------
@@ -355,7 +342,6 @@ def save_mood(df):
     out.to_csv(path, index=False)
 
 
-
 # -------------------------------------------------
 # Seminare-Funktionen
 # -------------------------------------------------
@@ -389,9 +375,8 @@ def save_seminare(df):
     path = user_file("seminare.csv")
     os.makedirs(get_user_data_dir(), exist_ok=True)
     out = df.copy()
-    out["datum"] = pd.to_datetime(out["datum"], errors="coerce").dt.strftime("%Y-%m-%d")
+    out["datum"] = pd.to_datetime(df["datum"], errors="coerce").dt.strftime("%Y-%m-%d")
     out.to_csv(path, index=False)
-
 
 
 # -------------------------------------------------
@@ -427,7 +412,6 @@ def save_lernplan(df):
     out.to_csv(path, index=False)
 
 
-
 # -------------------------------------------------
 # Streamlit Setup
 # -------------------------------------------------
@@ -446,6 +430,8 @@ page = st.sidebar.radio(
         "Lernplan Woche",
         "Lernzettel erstellen",
         "PDFs zusammenfügen",
+        "PDF erstellen",
+        "LaTeX",
         "Mood-Tracker & Stressradar",
     ],
 )
@@ -607,7 +593,6 @@ if page == "Tagesübersicht":
             key="timer_break_minutes",
         )
 
-
     # 🔊 Sound-Auswahl
     st.markdown("### 🔊 Sound-Einstellungen")
 
@@ -650,7 +635,6 @@ if page == "Tagesübersicht":
                     st.warning(f"Sounddatei '{sound_name}' wurde nicht gefunden.")
             else:
                 st.info("Kein Sound ausgewählt.")
-
 
     # Verknüpfung mit Klausur
     aktive_klausuren = klausuren[~klausuren["archiviert"]]
@@ -736,7 +720,6 @@ if page == "Tagesübersicht":
                 st.session_state["timer_logged_to_exam"] = True
 
             # Sound abspielen (einmal)
-            # Sound abspielen (einmal, mit Auswahl)
             if not st.session_state["timer_sound_played"]:
                 sound_name = st.session_state.get("timer_sound_file")
                 if sound_name:
@@ -1156,7 +1139,6 @@ elif page == "Lernplan Woche":
         plan_df = pd.DataFrame(
             {"Tag": list(plan_dict.keys()), "Geplante Lernstunden": list(plan_dict.values())}
         )
-        # Schöne Darstellung mit "h"
         plan_df["Geplante Lernstunden"] = plan_df["Geplante Lernstunden"].map(
             lambda x: f"{x:.1f} h"
         )
@@ -1287,6 +1269,186 @@ elif page == "PDFs zusammenfügen":
             )
     else:
         st.info("Bitte wähle mindestens zwei PDFs aus.")
+
+
+# -------------------------------------------------
+# 7.5 🧾 PDF ERSTELLEN (externes Tool)
+# -------------------------------------------------
+
+elif page == "PDF erstellen":
+    st.title("🧾 PDF erstellen")
+
+    st.write(
+        "Zum Erstellen, Konvertieren und Bearbeiten von PDFs nutzt dieses Dashboard "
+        "das externe Tool **PDF24**."
+    )
+
+    st.link_button("➡️ PDF24 öffnen", "https://tools.pdf24.org/de/")
+
+    st.caption(
+        "Der Link öffnet sich in einem neuen Tab. Dort kannst du PDFs z.B. erstellen, "
+        "zusammenfügen, komprimieren oder in andere Formate umwandeln."
+    )
+
+
+# -------------------------------------------------
+# 9️⃣ LaTeX – Erklärung & Formelsammlung
+# -------------------------------------------------
+
+elif page == "LaTeX":
+    st.title("📐 LaTeX – kurz erklärt & Formelsammlung")
+
+    st.subheader("👀 Was ist LaTeX?")
+    st.markdown(
+        r"""
+LaTeX ist ein Textsatzsystem für **wissenschaftliche Arbeiten** (z.B. Bachelorarbeit, Hausarbeiten, Paper).
+
+Statt mit der Maus zu formatieren (wie in Word), schreibst du **Befehle im Text**, z.B.:
+
+Inline-Formel im Text: `$E = mc^2$`  
+Zentrierte Formel: `\[ E = mc^2 \]`
+
+LaTeX ist besonders stark, wenn du:
+- viele **Formeln** hast
+- ein sauberes **Inhaltsverzeichnis** brauchst
+- automatisch ein **Literaturverzeichnis** erzeugen willst
+"""
+    )
+
+    st.markdown("---")
+    st.subheader("📝 LaTeX für Text, Titel & Listen")
+
+    text_snippets = [
+        {
+            "title": "Dokument mit Titel",
+            "latex": r"""\documentclass[a4paper,12pt]{article}
+
+    \title{Titel der Arbeit}
+    \author{Dein Name}
+    \date{\today}
+
+    \begin{document}
+    \maketitle
+
+    Hier beginnt dein Text.
+
+    \end{document}""",
+            "desc": "Einfache Grundstruktur eines Dokuments mit Titelblatt.",
+        },
+        {
+            "title": "Abschnitt & Unterabschnitt",
+            "latex": r"""\section{Einleitung}
+    \subsection{Motivation}
+    Dies ist ein normaler Fließtext in LaTeX.""",
+            "desc": "Überschriften für Kapitel und Unterkapitel.",
+        },
+        {
+            "title": "Fett & kursiv",
+            "latex": r"""Dies ist \textbf{fetter Text} und dies ist \textit{kursiver Text}.""",
+            "desc": "Hervorhebung im Fließtext.",
+        },
+        {
+            "title": "Aufzählung (Liste)",
+            "latex": r"""\begin{itemize}
+      \item Erster Punkt
+      \item Zweiter Punkt
+      \item Dritter Punkt
+    \end{itemize}""",
+            "desc": "Unsortierte Liste mit Punkten.",
+        },
+        {
+            "title": "Nummerierte Liste",
+            "latex": r"""\begin{enumerate}
+      \item Erster Punkt
+      \item Zweiter Punkt
+      \item Dritter Punkt
+    \end{enumerate}""",
+            "desc": "Sortierte Liste mit Nummerierung.",
+        },
+        {
+            "title": "Zitat / Zitat-Umgebung",
+            "latex": r"""\begin{quote}
+    Dies ist ein eingerücktes Zitat.
+    \end{quote}""",
+            "desc": "Zitat oder wichtige Textpassage hervorheben.",
+        },
+        {
+            "title": "Mathe-Umgebung im Fließtext",
+            "latex": r"""Dies ist eine Formel im Text: $E = mc^2$.""",
+            "desc": "Inline-Math mit Dollarzeichen.",
+        },
+        {
+            "title": "Zentrierte Formel",
+            "latex": r"""\[
+    E = mc^2
+    \]""",
+            "desc": "Formel in einer eigenen zentrierten Zeile.",
+        },
+    ]
+
+    for ex in text_snippets:
+        st.markdown("---")
+        st.markdown(f"### {ex['title']}")
+        st.caption(ex["desc"])
+        st.code(ex["latex"], language="latex")
+
+
+    st.markdown("---")
+    st.subheader("🧮 Kleine LaTeX-Formelsammlung")
+
+    formulas = [
+        {"title": "Bruch", "latex": r"\frac{a}{b}", "desc": "Ein einfacher Bruch a/b"},
+        {"title": "Potenzen", "latex": r"a^2,\; a^n", "desc": "Quadrat und allgemeine Potenz"},
+        {"title": "Wurzel", "latex": r"\sqrt{a},\; \sqrt[n]{a}", "desc": "Quadratwurzel und n-te Wurzel"},
+        {"title": "Summenzeichen", "latex": r"\sum_{i=1}^{n} i", "desc": "Summe von i = 1 bis n"},
+        {"title": "Produktzeichen", "latex": r"\prod_{i=1}^{n} a_i", "desc": "Produkt über n Faktoren"},
+        {"title": "Mitternachtsformel", "latex": r"\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}",
+         "desc": "Lösung einer quadratischen Gleichung"},
+        {"title": "Ableitung", "latex": r"\frac{d}{dx} f(x)", "desc": "Ableitung von f nach x"},
+        {"title": "Integral", "latex": r"\int_{a}^{b} f(x)\,dx", "desc": "Bestimmtes Integral von a bis b"},
+        {"title": "Grenzwert", "latex": r"\lim_{x \to \infty} f(x)", "desc": "Grenzwert von f(x) für x→∞"},
+        {"title": "Exponentialfunktion", "latex": r"e^{x}", "desc": "Eulersche Exponentialfunktion"},
+        {"title": "Logarithmus", "latex": r"\ln(x),\; \log_{10}(x)",
+         "desc": "Natürlicher Logarithmus und Zehnerlogarithmus"},
+        {"title": "Trigonometrie", "latex": r"\sin(x),\; \cos(x),\; \tan(x)", "desc": "Trigonometrische Funktionen"},
+        {"title": "Betrag", "latex": r"|x|", "desc": "Betrag einer Zahl x"},
+        {"title": "Norm", "latex": r"\| \vec{x} \|", "desc": "Norm eines Vektors x"},
+        {"title": "Skalarprodukt", "latex": r"\langle \vec{a}, \vec{b} \rangle",
+         "desc": "Skalarprodukt zweier Vektoren"},
+        {"title": "Vektor", "latex": r"\vec{v} = \begin{pmatrix} v_1 \\ v_2 \\ v_3 \end{pmatrix}",
+         "desc": "Spaltenvektor mit drei Komponenten"},
+        {"title": "Matrix 2×2", "latex": r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}", "desc": "2×2-Matrix"},
+        {"title": "Lineares Gleichungssystem",
+         "latex": r"\begin{cases} a_1x + b_1y = c_1 \\ a_2x + b_2y = c_2 \end{cases}",
+         "desc": "Zweizeiliges Gleichungssystem"},
+        {"title": "Menge", "latex": r"\{ x \in \mathbb{R} \mid x > 0 \}",
+         "desc": "Menge aller positiven reellen Zahlen"},
+        {"title": "Vereinigung & Schnitt", "latex": r"A \cup B,\; A \cap B",
+         "desc": "Vereinigung und Schnitt zweier Mengen"},
+        {"title": "Wahrscheinlichkeit", "latex": r"P(A) = \frac{|A|}{|\Omega|}",
+         "desc": "Einfache Wahrscheinlichkeitsdefinition"},
+        {"title": "Erwartungswert", "latex": r"\mathbb{E}(X)", "desc": "Erwartungswert der Zufallsvariablen X"},
+        {"title": "Varianz", "latex": r"\mathrm{Var}(X) = \mathbb{E}\big[(X - \mathbb{E}(X))^2\big]",
+         "desc": "Varianz von X"},
+        {"title": "Binomialkoeffizient", "latex": r"\binom{n}{k}",
+         "desc": "Anzahl der Möglichkeiten, k aus n zu wählen"},
+        {"title": "Binomischer Lehrsatz", "latex": r"(a+b)^n = \sum_{k=0}^{n} \binom{n}{k} a^{n-k} b^{k}",
+         "desc": "Binomischer Lehrsatz"},
+        {"title": "Standardnormalverteilung", "latex": r"\varphi(x) = \frac{1}{\sqrt{2\pi}} e^{-\frac{x^2}{2}}",
+         "desc": "Dichte der Standardnormalverteilung"},
+    ]
+
+    for f in formulas:
+        st.markdown("---")
+        st.markdown(f"### {f['title']}")
+        st.latex(f["latex"])
+        st.caption(f["desc"])
+        st.markdown("LaTeX-Code:")
+        st.code(f["latex"], language="latex")
+
+
+    st.markdown("---")
+    st.info("Tipp: Inline-Formeln: `$ ... $`, Blockformeln: `\\[ ... \\]`")
 
 
 # -------------------------------------------------

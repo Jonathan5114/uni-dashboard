@@ -15,51 +15,42 @@ import streamlit.components.v1 as components
 # -------------------------------------------------
 # 🔒 LOGIN-SCHUTZ
 # -------------------------------------------------
-
-# Benutzer + Passwörter definieren
 VALID_USERS = {
     "jonathan": "IchBinJon",
     "Anna-Lena": "IchBinAnn",
     "lara": "IchBinLara",
 }
 
-# Login-Funktion
 def login_page():
     st.title("🔐 Login – Uni-Dashboard")
-
     username = st.text_input("Benutzername")
     password = st.text_input("Passwort", type="password")
 
     if st.button("Einloggen"):
         if username in VALID_USERS and VALID_USERS[username] == password:
             st.session_state["logged_in"] = True
-            st.session_state["user"] = username   # 👈 Nutzername für persönlichen Ordner
+            st.session_state["user"] = username
             st.success("Erfolgreich eingeloggt! 🎉")
             st.rerun()
         else:
             st.error("❌ Benutzername oder Passwort falsch")
 
 
-# Status anlegen, falls nicht vorhanden
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
-# Wenn nicht eingeloggt → Login anzeigen
 if not st.session_state["logged_in"]:
     login_page()
-    st.stop()  # verhindert, dass der Rest der App geladen wird
+    st.stop()
+
 
 # -------------------------------------------------
 # 👋 Begrüßungsbanner mit Tageszeit
 # -------------------------------------------------
-
-# EINGELOGGTEN BENUTZER LADEN
 user = st.session_state.get("user", "Unbekannt")
 welcome_name = user.capitalize()
 
-# Tageszeit bestimmen
 hour = datetime.now().hour
-
 if hour < 11:
     greeting = "🌅 Guten Morgen"
 elif hour < 17:
@@ -67,7 +58,6 @@ elif hour < 17:
 else:
     greeting = "🌙 Guten Abend"
 
-# Banner anzeigen
 st.markdown(
     f"""
     <div style='
@@ -87,30 +77,85 @@ st.markdown(
 # -------------------------------------------------
 # Nutzerabhängige Datenpfade
 # -------------------------------------------------
-
 BASE_DATA_DIR = "data"
 
 def get_user_data_dir():
-    """
-    Gibt den persönlichen Datenordner des eingeloggten Users zurück,
-    z.B. data/jonathan oder data/person1.
-    """
-    user = st.session_state.get("user", "default")
-    path = os.path.join(BASE_DATA_DIR, user)
+    user_ = st.session_state.get("user", "default")
+    path = os.path.join(BASE_DATA_DIR, user_)
     os.makedirs(path, exist_ok=True)
     return path
 
 def user_file(name: str) -> str:
-    """
-    Hilfsfunktion: gibt den Pfad zu einer Datei im User-Ordner zurück.
-    Beispiel: user_file("klausuren.csv") -> data/<user>/klausuren.csv
-    """
     return os.path.join(get_user_data_dir(), name)
+
+
+# -------------------------------------------------
+# ✅ ZENTRALER SPEICHER: dashboard_data.json (pro User)
+# -------------------------------------------------
+DASHBOARD_JSON = "dashboard_data.json"
+
+DEFAULT_STORE = {
+    "klausuren": [],       # list[dict]
+    "todos": [],           # list[dict]
+    "seminare": [],        # list[dict]
+    "lernplan": [],        # list[dict]
+    "mood": [],            # list[dict]
+    "stundenplan_html": "" # str
+}
+
+def _atomic_write_json(path: str, obj: dict):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+
+def save_store(store: dict):
+    path = user_file(DASHBOARD_JSON)
+    _atomic_write_json(path, store)
+
+def normalize_store(data: dict) -> dict:
+    """Sorgt dafür, dass alle Keys vorhanden sind und Typen passen."""
+    if not isinstance(data, dict):
+        return DEFAULT_STORE.copy()
+
+    fixed = DEFAULT_STORE.copy()
+    for k in fixed.keys():
+        if k in data:
+            fixed[k] = data[k]
+
+    if not isinstance(fixed.get("klausuren"), list): fixed["klausuren"] = []
+    if not isinstance(fixed.get("todos"), list): fixed["todos"] = []
+    if not isinstance(fixed.get("seminare"), list): fixed["seminare"] = []
+    if not isinstance(fixed.get("lernplan"), list): fixed["lernplan"] = []
+    if not isinstance(fixed.get("mood"), list): fixed["mood"] = []
+    if not isinstance(fixed.get("stundenplan_html"), str): fixed["stundenplan_html"] = ""
+    return fixed
+
+def load_store() -> dict:
+    path = user_file(DASHBOARD_JSON)
+    if not os.path.exists(path):
+        save_store(DEFAULT_STORE)
+        return DEFAULT_STORE.copy()
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        data = DEFAULT_STORE.copy()
+
+    return normalize_store(data)
+
+# Store einmal pro Session laden
+if "store" not in st.session_state:
+    st.session_state["store"] = load_store()
+
+store = st.session_state["store"]
+
 
 # -------------------------------------------------
 # Hilfsfunktionen allgemein
 # -------------------------------------------------
-
 def safe_rerun():
     try:
         st.rerun()
@@ -119,7 +164,6 @@ def safe_rerun():
             st.experimental_rerun()
         except Exception:
             pass
-
 
 def open_path_or_url(path: str):
     """Ordner oder URL öffnen."""
@@ -142,50 +186,51 @@ def open_path_or_url(path: str):
 
 
 # -------------------------------------------------
-# Stundenplan-Funktionen
+# Helper: Date parsing/formatting
 # -------------------------------------------------
-
-def load_stundenplan():
-    path = user_file("stundenplan.csv")
-
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=["datum", "zeit", "fach", "raum"])
-
+def _to_date_safe(x):
+    if x is None or x == "" or (isinstance(x, float) and pd.isna(x)):
+        return pd.NaT
     try:
-        df = pd.read_csv(path, sep=None, engine="python")
+        return pd.to_datetime(x, errors="coerce").date()
     except Exception:
-        return pd.DataFrame(columns=["datum", "zeit", "fach", "raum"])
+        return pd.NaT
 
-    if "datum" not in df.columns:
-        return pd.DataFrame(columns=["datum", "zeit", "fach", "raum"])
-
-    df["datum"] = pd.to_datetime(df["datum"], errors="coerce").dt.date
-    return df
+def _date_to_str(d):
+    try:
+        if pd.isna(d):
+            return ""
+    except Exception:
+        pass
+    if isinstance(d, datetime):
+        return d.date().isoformat()
+    return str(d)
 
 
 # -------------------------------------------------
-# Klausuren-Funktionen (+ Lernfortschritt)
+# Stundenplan HTML (STORE)
 # -------------------------------------------------
+def load_stundenplan_html() -> str:
+    return store.get("stundenplan_html", "") or ""
+
+def save_stundenplan_html(html: str):
+    store["stundenplan_html"] = html
+    save_store(store)
+
+
+# -------------------------------------------------
+# Klausuren (STORE)
+# -------------------------------------------------
+KLAUSUREN_COLS = [
+    "fach", "datum", "lernordner", "tage_vorher",
+    "archiviert", "note", "ziel_stunden", "gelernt_stunden"
+]
 
 def load_klausuren():
-    path = user_file("klausuren.csv")
+    rows = store.get("klausuren", [])
+    df = pd.DataFrame(rows)
 
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=[
-            "fach", "datum", "lernordner", "tage_vorher",
-            "archiviert", "note", "ziel_stunden", "gelernt_stunden"
-        ])
-
-    try:
-        df = pd.read_csv(path, sep=None, engine="python")
-    except Exception:
-        return pd.DataFrame(columns=[
-            "fach", "datum", "lernordner", "tage_vorher",
-            "archiviert", "note", "ziel_stunden", "gelernt_stunden"
-        ])
-
-    for col in ["fach", "datum", "lernordner", "tage_vorher",
-                "archiviert", "note", "ziel_stunden", "gelernt_stunden"]:
+    for col in KLAUSUREN_COLS:
         if col not in df.columns:
             if col == "tage_vorher":
                 df[col] = 21
@@ -198,27 +243,23 @@ def load_klausuren():
             else:
                 df[col] = ""
 
-    df["datum"] = pd.to_datetime(df["datum"], errors="coerce").dt.date
+    df["datum"] = df["datum"].apply(_to_date_safe)
     df["tage_vorher"] = pd.to_numeric(df["tage_vorher"], errors="coerce").fillna(21).astype(int)
     df["archiviert"] = df["archiviert"].astype(bool)
     df["note"] = df["note"].astype(str)
     df["ziel_stunden"] = pd.to_numeric(df["ziel_stunden"], errors="coerce").fillna(0.0)
     df["gelernt_stunden"] = pd.to_numeric(df["gelernt_stunden"], errors="coerce").fillna(0.0)
 
-    return df
-
+    return df[KLAUSUREN_COLS].copy()
 
 def save_klausuren(df):
-    path = user_file("klausuren.csv")
     out = df.copy()
-    out["datum"] = pd.to_datetime(out["datum"], errors="coerce").dt.strftime("%Y-%m-%d")
-    cols = ["fach", "datum", "lernordner", "tage_vorher",
-            "archiviert", "note", "ziel_stunden", "gelernt_stunden"]
-    out[cols].to_csv(path, index=False)
-
+    out["datum"] = out["datum"].apply(_date_to_str)
+    out = out[KLAUSUREN_COLS]
+    store["klausuren"] = out.to_dict(orient="records")
+    save_store(store)
 
 def compute_exam_risk(row, today):
-    """grobe Risiko-Einschätzung anhand Tage/Lernstand."""
     datum = row["datum"]
     if pd.isna(datum):
         return "unbekannt", "Datum fehlt"
@@ -250,46 +291,116 @@ def compute_exam_risk(row, today):
 
 
 # -------------------------------------------------
-# To-Do-Funktionen
+# Todos (STORE)
 # -------------------------------------------------
-
 def load_todos():
-    path = user_file("todos.json")
-
-    if not os.path.exists(path):
-        return []
-
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception:
-        return []
-
+    data = store.get("todos", [])
     norm = []
     for t in data:
         norm.append(
             {
                 "text": t.get("text", ""),
-                "done": t.get("done", False),
+                "done": bool(t.get("done", False)),
                 "fach": t.get("fach", ""),
-                "wichtig": t.get("wichtig", False),
+                "wichtig": bool(t.get("wichtig", False)),
                 "faellig": t.get("faellig", ""),
             }
         )
     return norm
 
-
 def save_todos(todos):
-    path = user_file("todos.json")
-    os.makedirs(get_user_data_dir(), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(todos, f, ensure_ascii=False, indent=2)
+    store["todos"] = todos
+    save_store(store)
+
+
+# -------------------------------------------------
+# Mood (STORE)
+# -------------------------------------------------
+MOOD_COLS = ["datum", "stimmung", "stress", "schlaf", "notiz"]
+
+def load_mood():
+    rows = store.get("mood", [])
+    df = pd.DataFrame(rows)
+    for c in MOOD_COLS:
+        if c not in df.columns:
+            df[c] = "" if c == "notiz" else 0
+
+    df["datum"] = df["datum"].apply(_to_date_safe)
+    df["stimmung"] = pd.to_numeric(df["stimmung"], errors="coerce").fillna(0).astype(int)
+    df["stress"] = pd.to_numeric(df["stress"], errors="coerce").fillna(0).astype(int)
+    df["schlaf"] = pd.to_numeric(df["schlaf"], errors="coerce").fillna(0.0)
+    df["notiz"] = df["notiz"].astype(str)
+    return df[MOOD_COLS].copy()
+
+def save_mood(df):
+    out = df.copy()
+    out["datum"] = out["datum"].apply(_date_to_str)
+    store["mood"] = out[MOOD_COLS].to_dict(orient="records")
+    save_store(store)
+
+
+# -------------------------------------------------
+# Seminare (STORE)
+# -------------------------------------------------
+SEMINAR_COLS = ["titel", "datum", "uhrzeit1", "datum2", "uhrzeit2", "notiz", "punkte", "absolviert"]
+
+def load_seminare():
+    rows = store.get("seminare", [])
+    df = pd.DataFrame(rows)
+
+    for col in SEMINAR_COLS:
+        if col not in df.columns:
+            if col == "punkte":
+                df[col] = 0.0
+            elif col == "absolviert":
+                df[col] = False
+            else:
+                df[col] = ""
+
+    df["datum"] = df["datum"].apply(_to_date_safe)
+    df["datum2"] = df["datum2"].apply(_to_date_safe)
+    df["punkte"] = pd.to_numeric(df["punkte"], errors="coerce").fillna(0.0)
+    df["absolviert"] = df["absolviert"].astype(bool)
+    df["titel"] = df["titel"].astype(str)
+    df["uhrzeit1"] = df["uhrzeit1"].astype(str)
+    df["uhrzeit2"] = df["uhrzeit2"].astype(str)
+    df["notiz"] = df["notiz"].astype(str)
+    return df[SEMINAR_COLS].copy()
+
+def save_seminare(df):
+    out = df.copy()
+    out["datum"] = out["datum"].apply(_date_to_str)
+    out["datum2"] = out["datum2"].apply(_date_to_str)
+    store["seminare"] = out[SEMINAR_COLS].to_dict(orient="records")
+    save_store(store)
+
+
+# -------------------------------------------------
+# Lernplan (STORE)
+# -------------------------------------------------
+LERNPLAN_COLS = ["fach", "stunden_pro_woche", "priorität"]
+
+def load_lernplan():
+    rows = store.get("lernplan", [])
+    df = pd.DataFrame(rows)
+    for col in LERNPLAN_COLS:
+        if col not in df.columns:
+            df[col] = "" if col == "fach" else (0.0 if col == "stunden_pro_woche" else 2)
+
+    df["fach"] = df["fach"].astype(str)
+    df["stunden_pro_woche"] = pd.to_numeric(df["stunden_pro_woche"], errors="coerce").fillna(0.0)
+    df["priorität"] = pd.to_numeric(df["priorität"], errors="coerce").fillna(2).astype(int)
+    return df[LERNPLAN_COLS].copy()
+
+def save_lernplan(df):
+    out = df.copy()
+    store["lernplan"] = out[LERNPLAN_COLS].to_dict(orient="records")
+    save_store(store)
 
 
 # -------------------------------------------------
 # Datei-Extraktion für Lernzettel
 # -------------------------------------------------
-
 def extract_text_from_file(uploaded_file):
     filename = uploaded_file.name.lower()
 
@@ -318,106 +429,8 @@ def extract_text_from_file(uploaded_file):
 
 
 # -------------------------------------------------
-# Mood-Tracker Funktionen
-# -------------------------------------------------
-
-def load_mood():
-    path = user_file("mood.csv")
-
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=["datum", "stimmung", "stress", "schlaf", "notiz"])
-    try:
-        df = pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame(columns=["datum", "stimmung", "stress", "schlaf", "notiz"])
-    if "datum" in df.columns:
-        df["datum"] = pd.to_datetime(df["datum"], errors="coerce").dt.date
-    return df
-
-
-def save_mood(df):
-    path = user_file("mood.csv")
-    os.makedirs(get_user_data_dir(), exist_ok=True)
-    out = df.copy()
-    if "datum" in out.columns:
-        out["datum"] = pd.to_datetime(out["datum"], errors="coerce").dt.strftime("%Y-%m-%d")
-    out.to_csv(path, index=False)
-
-
-# -------------------------------------------------
-# Seminare-Funktionen
-# -------------------------------------------------
-
-def load_seminare():
-    path = user_file("seminare.csv")
-
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=["titel", "datum", "ort", "punkte", "absolviert"])
-    try:
-        df = pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame(columns=["titel", "datum", "ort", "punkte", "absolviert"])
-
-    for col in ["titel", "datum", "ort", "punkte", "absolviert"]:
-        if col not in df.columns:
-            if col == "punkte":
-                df[col] = 0.0
-            elif col == "absolviert":
-                df[col] = False
-            else:
-                df[col] = ""
-
-    df["datum"] = pd.to_datetime(df["datum"], errors="coerce").dt.date
-    df["punkte"] = pd.to_numeric(df["punkte"], errors="coerce").fillna(0.0)
-    df["absolviert"] = df["absolviert"].astype(bool)
-    return df
-
-
-def save_seminare(df):
-    path = user_file("seminare.csv")
-    os.makedirs(get_user_data_dir(), exist_ok=True)
-    out = df.copy()
-    out["datum"] = pd.to_datetime(df["datum"], errors="coerce").dt.strftime("%Y-%m-%d")
-    out.to_csv(path, index=False)
-
-
-# -------------------------------------------------
-# Lernplan-Funktionen
-# -------------------------------------------------
-
-def load_lernplan():
-    path = user_file("lernplan.csv")
-
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=["fach", "stunden_pro_woche", "priorität"])
-    try:
-        df = pd.read_csv(path)
-    except Exception:
-        return pd.DataFrame(columns=["fach", "stunden_pro_woche", "priorität"])
-
-    if "fach" not in df.columns:
-        df["fach"] = ""
-    if "stunden_pro_woche" not in df.columns:
-        df["stunden_pro_woche"] = 0.0
-    if "priorität" not in df.columns:
-        df["priorität"] = 2
-
-    df["stunden_pro_woche"] = pd.to_numeric(df["stunden_pro_woche"], errors="coerce").fillna(0.0)
-    df["priorität"] = pd.to_numeric(df["priorität"], errors="coerce").fillna(2).astype(int)
-    return df
-
-
-def save_lernplan(df):
-    path = user_file("lernplan.csv")
-    os.makedirs(get_user_data_dir(), exist_ok=True)
-    out = df.copy()
-    out.to_csv(path, index=False)
-
-
-# -------------------------------------------------
 # Streamlit Setup
 # -------------------------------------------------
-
 st.set_page_config(page_title="Uni-Dashboard", page_icon="📚", layout="wide")
 
 st.sidebar.title("📚 Uni-Dashboard (v5)")
@@ -438,8 +451,45 @@ page = st.sidebar.radio(
     ],
 )
 
+# ✅ UPGRADE: Backup/Restore in Sidebar
+st.sidebar.divider()
+st.sidebar.subheader("💾 Backup / Restore")
+
+backup_json = json.dumps(store, ensure_ascii=False, indent=2).encode("utf-8")
+st.sidebar.download_button(
+    "⬇️ Backup herunterladen (JSON)",
+    data=backup_json,
+    file_name=f"dashboard_backup_{st.session_state.get('user','user')}.json",
+    mime="application/json",
+    use_container_width=True,
+)
+
+uploaded_backup = st.sidebar.file_uploader(
+    "⬆️ Backup wiederherstellen (JSON)",
+    type=["json"],
+    help="Lädt ein Backup und überschreibt deine aktuellen Daten.",
+)
+
+if uploaded_backup is not None:
+    try:
+        imported = json.loads(uploaded_backup.read().decode("utf-8"))
+        imported = normalize_store(imported)
+
+        st.sidebar.warning("Achtung: Restore überschreibt ALLE aktuellen Daten.")
+        if st.sidebar.button("✅ Restore jetzt durchführen", use_container_width=True):
+            st.session_state["store"] = imported
+            store.clear()
+            store.update(imported)
+            save_store(store)
+            st.sidebar.success("Restore erfolgreich ✅")
+            safe_rerun()
+
+    except Exception as e:
+        st.sidebar.error(f"Backup konnte nicht geladen werden: {e}")
+
 today = datetime.today().date()
-stundenplan = load_stundenplan()
+
+# ✅ Alles aus dashboard_data.json laden
 klausuren = load_klausuren()
 todos = load_todos()
 seminare = load_seminare()
@@ -449,15 +499,12 @@ lernplan = load_lernplan()
 # -------------------------------------------------
 # 0️⃣ TAGESÜBERSICHT
 # -------------------------------------------------
-
 if page == "Tagesübersicht":
     st.title("🏠 Tagesübersicht")
-
     st.subheader(f"Heute: {today.strftime('%A, %d.%m.%Y')}")
 
     col1, col2, col3 = st.columns(3)
 
-    # Nächste Klausuren
     with col1:
         st.markdown("### 📆 Nächste Klausuren")
         aktive = klausuren[~klausuren["archiviert"]].copy()
@@ -480,7 +527,6 @@ if page == "Tagesübersicht":
                 else:
                     st.info(msg)
 
-    # Wichtige To-Dos
     with col2:
         st.markdown("### ✅ Wichtige To-Dos (Top 5)")
         open_todos = [t for t in todos if not t["done"]]
@@ -506,12 +552,8 @@ if page == "Tagesübersicht":
                         label += f" – bis {d.strftime('%d.%m.%Y')}"
                     except Exception:
                         label += f" – bis {t['faellig']}"
-                if t.get("wichtig"):
-                    st.write("🔴 " + label)
-                else:
-                    st.write("🟢 " + label)
+                st.write(("🔴 " if t.get("wichtig") else "🟢 ") + label)
 
-    # Seminare & Stimmung
     with col3:
         st.markdown("### 🎓 Seminare & Stimmung")
         sem_today = seminare[pd.notna(seminare["datum"])]
@@ -556,7 +598,6 @@ if page == "Tagesübersicht":
     st.markdown("---")
     st.subheader("⏱️ Lernzeit-Timer (Pomodoro light)")
 
-    # Timer-State
     if "timer_mode" not in st.session_state:
         st.session_state["timer_mode"] = None
     if "timer_start" not in st.session_state:
@@ -574,7 +615,6 @@ if page == "Tagesübersicht":
     if "timer_logged_to_exam" not in st.session_state:
         st.session_state["timer_logged_to_exam"] = False
 
-    # Verfügbare Sounds aus Ordner einlesen
     sound_dir = "sounds"
     available_sounds = []
     if os.path.isdir(sound_dir):
@@ -583,56 +623,22 @@ if page == "Tagesübersicht":
                 available_sounds.append(f)
 
     if "timer_sound_file" not in st.session_state:
-        # Standard: erster gefundener Sound, sonst kein Sound
         st.session_state["timer_sound_file"] = available_sounds[0] if available_sounds else None
 
     col_t1, col_t2, col_t3 = st.columns(3)
-
     with col_t1:
-        st.number_input(
-            "Lernphase (Minuten)",
-            min_value=5,
-            max_value=180,
-            key="timer_learn_minutes",
-        )
-
+        st.number_input("Lernphase (Minuten)", min_value=5, max_value=180, key="timer_learn_minutes")
     with col_t2:
-        st.number_input(
-            "Pause (Minuten)",
-            min_value=1,
-            max_value=60,
-            key="timer_break_minutes",
-        )
+        st.number_input("Pause (Minuten)", min_value=1, max_value=60, key="timer_break_minutes")
 
-    # 🔊 Sound-Auswahl
     st.markdown("### 🔊 Sound-Einstellungen")
-
     col_s1, col_s2 = st.columns([2, 1])
-
     with col_s1:
-        if available_sounds:
-            options = ["(kein Sound)"] + available_sounds
-        else:
-            options = ["(kein Sound)"]
-
+        options = ["(kein Sound)"] + available_sounds if available_sounds else ["(kein Sound)"]
         current = st.session_state.get("timer_sound_file")
-        # passenden Index bestimmen
-        if current in available_sounds:
-            default_index = options.index(current)
-        else:
-            default_index = 0
-
-        choice = st.selectbox(
-            "Alarm-Sound",
-            options,
-            index=default_index,
-            help="Die Sounddateien liegen im Ordner 'sounds/'.",
-        )
-
-        if choice == "(kein Sound)":
-            st.session_state["timer_sound_file"] = None
-        else:
-            st.session_state["timer_sound_file"] = choice
+        default_index = options.index(current) if current in options else 0
+        choice = st.selectbox("Alarm-Sound", options, index=default_index)
+        st.session_state["timer_sound_file"] = None if choice == "(kein Sound)" else choice
 
     with col_s2:
         if st.button("Sound testen"):
@@ -647,28 +653,17 @@ if page == "Tagesübersicht":
             else:
                 st.info("Kein Sound ausgewählt.")
 
-    # Verknüpfung mit Klausur
     aktive_klausuren = klausuren[~klausuren["archiviert"]]
     exam_options = {"(keine Verknüpfung)": None}
     for idx, row in aktive_klausuren.iterrows():
-        if pd.notna(row["datum"]):
-            label = f"{row['fach']} – {row['datum'].strftime('%d.%m.%Y')}"
-        else:
-            label = f"{row['fach']} – (ohne Datum)"
+        label = f"{row['fach']} – {row['datum'].strftime('%d.%m.%Y')}" if pd.notna(row["datum"]) else f"{row['fach']} – (ohne Datum)"
         exam_options[label] = idx
 
-    selected_label = st.selectbox(
-        "Timer mit Klausur verknüpfen (optional)",
-        list(exam_options.keys()),
-    )
+    selected_label = st.selectbox("Timer mit Klausur verknüpfen (optional)", list(exam_options.keys()))
     st.session_state["timer_exam_index"] = exam_options[selected_label]
 
     def start_timer(mode):
-        minutes = (
-            st.session_state["timer_learn_minutes"]
-            if mode == "Lernphase"
-            else st.session_state["timer_break_minutes"]
-        )
+        minutes = st.session_state["timer_learn_minutes"] if mode == "Lernphase" else st.session_state["timer_break_minutes"]
         st.session_state["timer_mode"] = mode
         st.session_state["timer_start"] = datetime.now().isoformat()
         st.session_state["timer_duration"] = int(minutes * 60)
@@ -688,7 +683,6 @@ if page == "Tagesübersicht":
             st.session_state["timer_logged_to_exam"] = False
 
     st.write("---")
-
     if st.session_state["timer_mode"] and st.session_state["timer_start"]:
         mode = st.session_state["timer_mode"]
         start_dt = datetime.fromisoformat(st.session_state["timer_start"])
@@ -705,18 +699,10 @@ if page == "Tagesübersicht":
 
         if remaining > 0:
             st.write(f"Noch {mins:02d}:{secs:02d} Minuten")
-            st.caption("Hinweis: Timer aktualisiert sich beim Seiten-Refresh.")
         else:
-            if mode == "Lernphase":
-                st.success("Lernphase fertig – Zeit für eine Pause! 🎉")
-            else:
-                st.info("Pause vorbei – weiter geht's! 💪")
+            st.success("Fertig! ✅" if mode == "Lernphase" else "Pause vorbei! 💪")
 
-            # Lernzeit auf Klausur buchen, falls verknüpft
-            if (
-                mode == "Lernphase"
-                and not st.session_state["timer_logged_to_exam"]
-            ):
+            if mode == "Lernphase" and not st.session_state["timer_logged_to_exam"]:
                 exam_idx = st.session_state.get("timer_exam_index")
                 if exam_idx is not None and exam_idx in klausuren.index:
                     minutes = st.session_state["timer_learn_minutes"]
@@ -724,13 +710,9 @@ if page == "Tagesübersicht":
                     vorher = float(klausuren.at[exam_idx, "gelernt_stunden"])
                     klausuren.at[exam_idx, "gelernt_stunden"] = vorher + hours
                     save_klausuren(klausuren)
-                    st.success(
-                        f"{hours:.2f} h wurden für "
-                        f"'{klausuren.at[exam_idx, 'fach']}' gutgeschrieben."
-                    )
+                    st.success(f"{hours:.2f} h wurden für '{klausuren.at[exam_idx, 'fach']}' gutgeschrieben.")
                 st.session_state["timer_logged_to_exam"] = True
 
-            # Sound abspielen (einmal)
             if not st.session_state["timer_sound_played"]:
                 sound_name = st.session_state.get("timer_sound_file")
                 if sound_name:
@@ -741,81 +723,43 @@ if page == "Tagesübersicht":
                     except FileNotFoundError:
                         st.warning(f"Sounddatei '{sound_name}' wurde nicht gefunden.")
                 st.session_state["timer_sound_played"] = True
-
     else:
         st.write("Kein Timer aktiv. Starte eine Lernphase oder Pause.")
 
 
 # -------------------------------------------------
-# 1️⃣ STUNDENPLAN – HTML mit Scrollbalken + Speichern
+# 1️⃣ STUNDENPLAN – HTML (JETZT IN JSON)
 # -------------------------------------------------
-
 elif page == "Stundenplan":
     st.title("📅 Stundenplan (HTML)")
 
     st.markdown(
-        "Hier kannst du deinen Stundenplan als **HTML-Datei** anzeigen.\n\n"
-        "- Gespeicherte Version wird automatisch geladen\n"
-        "- Du kannst eine neue HTML-Datei hochladen\n"
-        "- Es gibt Scrollbalken nach **unten** und **rechts**, damit nichts abgeschnitten wird\n"
-        "- Mit einem Speicher-Button wird der Stundenplan für deinen Nutzer gesichert"
+        "✅ Speichert jetzt in **dashboard_data.json** (pro User).\n\n"
+        "- Scrollbalken nach unten/rechts\n"
+        "- Upload → Vorschau → Speichern"
     )
 
-    # Feste Größe für den Frame (Scrollbalken kommen automatisch)
     FRAME_HEIGHT = 800
-    FRAME_WIDTH = 1200  # falls immer noch was abgeschnitten ist: z.B. 1400 machen
+    FRAME_WIDTH = 1200
 
-    html_loaded = False
-    html_content = ""
+    html_content = load_stundenplan_html().strip()
 
-    # Pfad für benutzerspezifische Datei
-    user_html_path = user_file("stundenplan.html")
-
-    # 1️⃣ Gespeicherte Nutzer-Datei laden (data/<user>/stundenplan.html)
-    if os.path.exists(user_html_path):
-        try:
-            with open(user_html_path, "r", encoding="utf-8") as f:
-                html_content = f.read()
-            html_loaded = True
-            st.success("Gespeicherten Stundenplan für diesen Benutzer geladen ✅")
-        except Exception as e:
-            st.error(f"Fehler beim Lesen der gespeicherten Datei: {e}")
-
-    # 2️⃣ Optional: Globale Datei im Projektordner als Fallback
-    if not html_loaded and os.path.exists("stundenplan.html"):
-        try:
-            with open("stundenplan.html", "r", encoding="utf-8") as f:
-                html_content = f.read()
-            html_loaded = True
-            st.info("Globale Datei `stundenplan.html` im Projektordner geladen.")
-        except Exception as e:
-            st.error(f"Fehler beim Lesen der globalen Datei: {e}")
-
-    # 3️⃣ Anzeige des aktuell geladenen Stundenplans
-    if html_loaded:
+    if html_content:
         st.markdown("### 🔍 Aktuell gespeicherter Stundenplan")
-        components.html(
-            html_content,
-            height=FRAME_HEIGHT,
-            width=FRAME_WIDTH,
-            scrolling=True,  # Scrollbalken für oben/unten + links/rechts
-        )
+        components.html(html_content, height=FRAME_HEIGHT, width=FRAME_WIDTH, scrolling=True)
+    else:
+        st.info("Noch kein Stundenplan gespeichert.")
 
     st.markdown("---")
     st.subheader("📤 Neuen HTML-Stundenplan hochladen")
 
-    uploaded_html = st.file_uploader(
-        "HTML-Datei auswählen (z.B. aus dem Uni-Portal exportiert):",
-        type=["html", "htm"]
-    )
+    uploaded_html = st.file_uploader("HTML-Datei auswählen:", type=["html", "htm"])
 
-    # Wir puffern den Inhalt in session_state, damit der Button danach noch drauf zugreifen kann
     if uploaded_html is not None:
         if (
             "stundenplan_html_upload" not in st.session_state
             or st.session_state.get("stundenplan_html_upload_name") != uploaded_html.name
         ):
-            # nur einmal einlesen
             html_text = uploaded_html.read().decode("utf-8", errors="ignore")
             st.session_state["stundenplan_html_upload"] = html_text
             st.session_state["stundenplan_html_upload_name"] = uploaded_html.name
@@ -823,44 +767,25 @@ elif page == "Stundenplan":
         html_upload_content = st.session_state["stundenplan_html_upload"]
 
         st.success(f"Neue HTML-Datei `{uploaded_html.name}` geladen ✅")
+        st.markdown("### 🧾 Vorschau")
+        components.html(html_upload_content, height=FRAME_HEIGHT, width=FRAME_WIDTH, scrolling=True)
 
-        st.markdown("### 🧾 Vorschau der hochgeladenen Datei")
-        components.html(
-            html_upload_content,
-            height=FRAME_HEIGHT,
-            width=FRAME_WIDTH,
-            scrolling=True,
-        )
-
-        # 💾 Speicher-Button
         if st.button("💾 Diesen Stundenplan für meinen Account speichern"):
-            try:
-                os.makedirs(get_user_data_dir(), exist_ok=True)
-                with open(user_html_path, "w", encoding="utf-8") as f:
-                    f.write(html_upload_content)
-                st.success("Stundenplan wurde gespeichert und wird beim nächsten Mal automatisch geladen ✅")
-            except Exception as e:
-                st.error(f"Fehler beim Speichern der Datei: {e}")
+            save_stundenplan_html(html_upload_content)
+            st.success("Stundenplan gespeichert ✅")
+            safe_rerun()
     else:
-        st.info("Lade eine neue HTML-Datei hoch, um sie anzuschauen oder zu speichern.")
-
-
-
+        st.info("Lade eine HTML-Datei hoch, um sie anzuschauen oder zu speichern.")
 
 
 # -------------------------------------------------
 # 2️⃣ KLAUSUREN & LERNEN
 # -------------------------------------------------
-
 elif page == "Klausuren & Lernen":
     st.title("📝 Klausuren & Lernen")
 
     view = st.radio("Ansicht", ["Aktive Klausuren", "Archiv"])
-
-    if view == "Aktive Klausuren":
-        df_view = klausuren[~klausuren["archiviert"]]
-    else:
-        df_view = klausuren[klausuren["archiviert"]]
+    df_view = klausuren[~klausuren["archiviert"]] if view == "Aktive Klausuren" else klausuren[klausuren["archiviert"]]
 
     if df_view.empty:
         st.info("Keine Klausuren in dieser Ansicht.")
@@ -881,17 +806,13 @@ elif page == "Klausuren & Lernen":
                 if not row["archiviert"]:
                     ziel = st.number_input(
                         "Geplante Lernstunden insgesamt",
-                        min_value=0.0,
-                        max_value=500.0,
-                        step=0.5,
+                        min_value=0.0, max_value=500.0, step=0.5,
                         value=float(row.get("ziel_stunden", 0.0) or 0.0),
                         key=f"ziel_{idx}",
                     )
                     gelernt = st.number_input(
                         "Bisher gelernte Stunden",
-                        min_value=0.0,
-                        max_value=500.0,
-                        step=0.5,
+                        min_value=0.0, max_value=500.0, step=0.5,
                         value=float(row.get("gelernt_stunden", 0.0) or 0.0),
                         key=f"gelernt_{idx}",
                     )
@@ -918,8 +839,7 @@ elif page == "Klausuren & Lernen":
 
                     new_tage = st.number_input(
                         "Empfohlene Tage vorher zu lernen",
-                        min_value=1,
-                        max_value=180,
+                        min_value=1, max_value=180,
                         value=int(row["tage_vorher"]),
                         key=f"tage_{idx}",
                     )
@@ -931,10 +851,8 @@ elif page == "Klausuren & Lernen":
                         default_note = 0.0
                     note = st.number_input(
                         "Note (0–15):",
-                        min_value=0.0,
-                        max_value=15.0,
-                        value=default_note,
-                        step=0.5,
+                        min_value=0.0, max_value=15.0,
+                        value=default_note, step=0.5,
                         key=f"note_{idx}",
                     )
                     klausuren.at[idx, "note"] = str(note)
@@ -973,14 +891,8 @@ elif page == "Klausuren & Lernen":
 
     if st.button("Klausur speichern"):
         klausuren.loc[len(klausuren)] = [
-            new_fach,
-            new_datum,
-            new_ordner,
-            int(new_tage),
-            False,
-            "",
-            float(new_ziel),
-            0.0,
+            new_fach, new_datum, new_ordner, int(new_tage),
+            False, "", float(new_ziel), 0.0
         ]
         save_klausuren(klausuren)
         st.success("Klausur wurde hinzugefügt!")
@@ -990,7 +902,6 @@ elif page == "Klausuren & Lernen":
 # -------------------------------------------------
 # 3️⃣ TO-DO LISTE
 # -------------------------------------------------
-
 elif page == "To-Do & Hausaufgaben":
     st.title("📋 To-Do Liste")
 
@@ -1040,9 +951,8 @@ elif page == "To-Do & Hausaufgaben":
 
 
 # -------------------------------------------------
-# 4️⃣ SEMINARE & PUNKTE – mit zwei Terminen + Notiz
+# 4️⃣ SEMINARE & PUNKTE
 # -------------------------------------------------
-
 elif page == "Seminare & Punkte":
     st.title("🎓 Seminare & Punkte")
 
@@ -1067,7 +977,6 @@ elif page == "Seminare & Punkte":
     else:
         delete_idx = None
 
-        # nach erstem Datum sortieren
         for idx, row in seminare.sort_values("datum", na_position="last").iterrows():
             st.markdown("---")
             c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
@@ -1075,7 +984,6 @@ elif page == "Seminare & Punkte":
             with c1:
                 st.write(f"**Titel:** {row['titel']}")
 
-                # Termin 1
                 if pd.notna(row["datum"]):
                     line1 = row["datum"].strftime("%d.%m.%Y")
                     if row.get("uhrzeit1", ""):
@@ -1084,51 +992,20 @@ elif page == "Seminare & Punkte":
                 else:
                     st.write("**Termin 1:** -")
 
-                # Termin 2 (optional + robust)
-                datum2_val = row.get("datum2", None)
-
-                if pd.notna(datum2_val) and str(datum2_val).strip() != "":
-                    # versuchen, in ein Datum zu konvertieren
-                    if isinstance(datum2_val, (datetime, pd.Timestamp)):
-                        d2_str = datum2_val.strftime("%d.%m.%Y")
-                    else:
-                        try:
-                            d2_parsed = pd.to_datetime(datum2_val, errors="coerce")
-                            if pd.isna(d2_parsed):
-                                # wenn es sich gar nicht parsen lässt, einfach Roh-String anzeigen
-                                d2_str = str(datum2_val)
-                            else:
-                                d2_str = d2_parsed.strftime("%d.%m.%Y")
-                        except Exception:
-                            d2_str = str(datum2_val)
-
+                datum2_val = row.get("datum2", pd.NaT)
+                if pd.notna(datum2_val):
+                    d2_str = datum2_val.strftime("%d.%m.%Y")
                     if row.get("uhrzeit2", ""):
                         d2_str += f", {row['uhrzeit2']}"
-
                     st.write(f"**Termin 2:** {d2_str}")
 
-                # Notiz statt „Ort / Anbieter“
-                notiz_val = row.get("notiz", "")
+                notiz_str = str(row.get("notiz", "") or "").strip()
+                st.write(f"**Notiz:** {notiz_str if notiz_str else '-'}")
 
-                if notiz_val is None:
-                    notiz_val = ""
-
-                # sicher zu String umwandeln
-                notiz_str = str(notiz_val).strip()
-
-                if notiz_str:
-                    st.write(f"**Notiz:** {notiz_str}")
-                else:
-                    st.write("**Notiz:** -")
-
-                    st.write(f"**Notiz:** {row['notiz']}")
-                
             with c2:
                 punkte_val = st.number_input(
                     "Punkte",
-                    min_value=0.0,
-                    max_value=30.0,
-                    step=0.5,
+                    min_value=0.0, max_value=30.0, step=0.5,
                     value=float(row["punkte"]),
                     key=f"sem_punkte_{idx}",
                 )
@@ -1137,7 +1014,7 @@ elif page == "Seminare & Punkte":
             with c3:
                 absolviert_val = st.checkbox(
                     "Absolviert?",
-                    value=row["absolviert"],
+                    value=bool(row["absolviert"]),
                     key=f"sem_done_{idx}",
                 )
                 seminare.at[idx, "absolviert"] = absolviert_val
@@ -1162,9 +1039,9 @@ elif page == "Seminare & Punkte":
     with col_d2:
         new_uhrzeit1 = st.text_input("Uhrzeit – Termin 1 (z.B. 10:00–12:00)", value="")
 
-    second_day = st.checkbox("Seminar hat einen zweiten Termin (z.B. an zwei Tagen)?", value=False)
+    second_day = st.checkbox("Seminar hat einen zweiten Termin?", value=False)
 
-    new_datum2 = None
+    new_datum2 = pd.NaT
     new_uhrzeit2 = ""
     if second_day:
         col_d3, col_d4 = st.columns(2)
@@ -1173,18 +1050,9 @@ elif page == "Seminare & Punkte":
         with col_d4:
             new_uhrzeit2 = st.text_input("Uhrzeit – Termin 2", value="")
 
-    new_notiz = st.text_area(
-        "Notiz (z.B. Raum, Gebäude, Online-Link, Anbieter, Sonstiges)",
-        value="",
-    )
+    new_notiz = st.text_area("Notiz (Raum/Link/Anbieter/…)", value="")
 
-    new_punkte = st.number_input(
-        "Punkte (z. B. ECTS/ETC)",
-        min_value=0.0,
-        max_value=30.0,
-        step=0.5,
-        value=0.0,
-    )
+    new_punkte = st.number_input("Punkte", min_value=0.0, max_value=30.0, step=0.5, value=0.0)
     new_done = st.checkbox("Bereits absolviert?", value=False)
 
     if st.button("Seminar speichern"):
@@ -1207,11 +1075,9 @@ elif page == "Seminare & Punkte":
             safe_rerun()
 
 
-
 # -------------------------------------------------
 # 5️⃣ LERNPLAN WOCHE
 # -------------------------------------------------
-
 elif page == "Lernplan Woche":
     st.title("📆 Lernplan für die Woche")
 
@@ -1224,18 +1090,12 @@ elif page == "Lernplan Woche":
         for idx, row in lernplan.iterrows():
             c1, c2, c3, c4 = st.columns([2, 1, 1, 0.5])
             with c1:
-                fach_val = st.text_input(
-                    "Fach",
-                    value=row["fach"],
-                    key=f"lp_fach_{idx}",
-                )
+                fach_val = st.text_input("Fach", value=row["fach"], key=f"lp_fach_{idx}")
                 lernplan.at[idx, "fach"] = fach_val
             with c2:
                 stunden_val = st.number_input(
                     "Stunden/Woche",
-                    min_value=0.0,
-                    max_value=50.0,
-                    step=0.5,
+                    min_value=0.0, max_value=50.0, step=0.5,
                     value=float(row["stunden_pro_woche"]),
                     key=f"lp_stunden_{idx}",
                 )
@@ -1259,12 +1119,10 @@ elif page == "Lernplan Woche":
 
         st.markdown("---")
         st.subheader("📊 Geplante Gesamtstunden pro Woche")
-
         total_hours = lernplan["stunden_pro_woche"].sum()
         st.write(f"**Summe:** {total_hours:.1f} Stunden/Woche")
 
         st.markdown("### Vorschlag: Verteilung auf die Wochentage (Mo–Fr)")
-
         days = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
         plan_dict = {d: 0.0 for d in days}
 
@@ -1276,12 +1134,8 @@ elif page == "Lernplan Woche":
             for d in days[:5]:
                 plan_dict[d] += share
 
-        plan_df = pd.DataFrame(
-            {"Tag": list(plan_dict.keys()), "Geplante Lernstunden": list(plan_dict.values())}
-        )
-        plan_df["Geplante Lernstunden"] = plan_df["Geplante Lernstunden"].map(
-            lambda x: f"{x:.1f} h"
-        )
+        plan_df = pd.DataFrame({"Tag": list(plan_dict.keys()), "Geplante Lernstunden": list(plan_dict.values())})
+        plan_df["Geplante Lernstunden"] = plan_df["Geplante Lernstunden"].map(lambda x: f"{x:.1f} h")
         st.table(plan_df)
 
     st.markdown("---")
@@ -1295,11 +1149,7 @@ elif page == "Lernplan Woche":
         if not lp_fach.strip():
             st.warning("Bitte Fachname eintragen.")
         else:
-            new_row = {
-                "fach": lp_fach.strip(),
-                "stunden_pro_woche": float(lp_stunden),
-                "priorität": int(lp_prio),
-            }
+            new_row = {"fach": lp_fach.strip(), "stunden_pro_woche": float(lp_stunden), "priorität": int(lp_prio)}
             lernplan = pd.concat([lernplan, pd.DataFrame([new_row])], ignore_index=True)
             save_lernplan(lernplan)
             st.success("Fach zum Lernplan hinzugefügt.")
@@ -1309,7 +1159,6 @@ elif page == "Lernplan Woche":
 # -------------------------------------------------
 # 6️⃣ LERNZETTEL ERSTELLEN
 # -------------------------------------------------
-
 elif page == "Lernzettel erstellen":
     st.title("🧠 Lernzettel erstellen")
 
@@ -1332,17 +1181,11 @@ elif page == "Lernzettel erstellen":
         st.subheader("📄 Zusammengeführtes Dokument")
         st.info("Bearbeite den Text, bevor du ihn an eine KI weitergibst.")
 
-        edited = st.text_area(
-            "Dokument bearbeiten:",
-            st.session_state["combined_text"],
-            height=350,
-        )
+        edited = st.text_area("Dokument bearbeiten:", st.session_state["combined_text"], height=350)
         st.session_state["combined_text"] = edited
 
         st.markdown("---")
         st.subheader("🤖 Mit KI weiterarbeiten")
-
-        st.write("Klicke auf eine Plattform, öffne sie im neuen Tab und füge dort deinen Text ein:")
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1375,7 +1218,6 @@ elif page == "Lernzettel erstellen":
 # -------------------------------------------------
 # 7️⃣ PDFs ZUSAMMENFÜGEN
 # -------------------------------------------------
-
 elif page == "PDFs zusammenfügen":
     st.title("📚 PDFs zusammenfügen")
 
@@ -1414,7 +1256,6 @@ elif page == "PDFs zusammenfügen":
 # -------------------------------------------------
 # 7.5 🧾 PDF ERSTELLEN (externes Tool)
 # -------------------------------------------------
-
 elif page == "PDF erstellen":
     st.title("🧾 PDF erstellen")
 
@@ -1432,9 +1273,8 @@ elif page == "PDF erstellen":
 
 
 # -------------------------------------------------
-# 9️⃣ LaTeX – Erklärung & Formelsammlung
+# 9️⃣ LaTeX – (dein Original-Teil bleibt)
 # -------------------------------------------------
-
 elif page == "LaTeX":
     st.title("📐 LaTeX – kurz erklärt & Formelsammlung")
 
@@ -1463,23 +1303,23 @@ LaTeX ist besonders stark, wenn du:
             "title": "Dokument mit Titel",
             "latex": r"""\documentclass[a4paper,12pt]{article}
 
-    \title{Titel der Arbeit}
-    \author{Dein Name}
-    \date{\today}
+\title{Titel der Arbeit}
+\author{Dein Name}
+\date{\today}
 
-    \begin{document}
-    \maketitle
+\begin{document}
+\maketitle
 
-    Hier beginnt dein Text.
+Hier beginnt dein Text.
 
-    \end{document}""",
+\end{document}""",
             "desc": "Einfache Grundstruktur eines Dokuments mit Titelblatt.",
         },
         {
             "title": "Abschnitt & Unterabschnitt",
             "latex": r"""\section{Einleitung}
-    \subsection{Motivation}
-    Dies ist ein normaler Fließtext in LaTeX.""",
+\subsection{Motivation}
+Dies ist ein normaler Fließtext in LaTeX.""",
             "desc": "Überschriften für Kapitel und Unterkapitel.",
         },
         {
@@ -1490,26 +1330,26 @@ LaTeX ist besonders stark, wenn du:
         {
             "title": "Aufzählung (Liste)",
             "latex": r"""\begin{itemize}
-      \item Erster Punkt
-      \item Zweiter Punkt
-      \item Dritter Punkt
-    \end{itemize}""",
+  \item Erster Punkt
+  \item Zweiter Punkt
+  \item Dritter Punkt
+\end{itemize}""",
             "desc": "Unsortierte Liste mit Punkten.",
         },
         {
             "title": "Nummerierte Liste",
             "latex": r"""\begin{enumerate}
-      \item Erster Punkt
-      \item Zweiter Punkt
-      \item Dritter Punkt
-    \end{enumerate}""",
+  \item Erster Punkt
+  \item Zweiter Punkt
+  \item Dritter Punkt
+\end{enumerate}""",
             "desc": "Sortierte Liste mit Nummerierung.",
         },
         {
             "title": "Zitat / Zitat-Umgebung",
             "latex": r"""\begin{quote}
-    Dies ist ein eingerücktes Zitat.
-    \end{quote}""",
+Dies ist ein eingerücktes Zitat.
+\end{quote}""",
             "desc": "Zitat oder wichtige Textpassage hervorheben.",
         },
         {
@@ -1520,8 +1360,8 @@ LaTeX ist besonders stark, wenn du:
         {
             "title": "Zentrierte Formel",
             "latex": r"""\[
-    E = mc^2
-    \]""",
+E = mc^2
+\]""",
             "desc": "Formel in einer eigenen zentrierten Zeile.",
         },
     ]
@@ -1532,7 +1372,6 @@ LaTeX ist besonders stark, wenn du:
         st.caption(ex["desc"])
         st.code(ex["latex"], language="latex")
 
-
     st.markdown("---")
     st.subheader("🧮 Kleine LaTeX-Formelsammlung")
 
@@ -1542,40 +1381,11 @@ LaTeX ist besonders stark, wenn du:
         {"title": "Wurzel", "latex": r"\sqrt{a},\; \sqrt[n]{a}", "desc": "Quadratwurzel und n-te Wurzel"},
         {"title": "Summenzeichen", "latex": r"\sum_{i=1}^{n} i", "desc": "Summe von i = 1 bis n"},
         {"title": "Produktzeichen", "latex": r"\prod_{i=1}^{n} a_i", "desc": "Produkt über n Faktoren"},
-        {"title": "Mitternachtsformel", "latex": r"\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}",
-         "desc": "Lösung einer quadratischen Gleichung"},
-        {"title": "Ableitung", "latex": r"\frac{d}{dx} f(x)", "desc": "Ableitung von f nach x"},
-        {"title": "Integral", "latex": r"\int_{a}^{b} f(x)\,dx", "desc": "Bestimmtes Integral von a bis b"},
-        {"title": "Grenzwert", "latex": r"\lim_{x \to \infty} f(x)", "desc": "Grenzwert von f(x) für x→∞"},
-        {"title": "Exponentialfunktion", "latex": r"e^{x}", "desc": "Eulersche Exponentialfunktion"},
-        {"title": "Logarithmus", "latex": r"\ln(x),\; \log_{10}(x)",
-         "desc": "Natürlicher Logarithmus und Zehnerlogarithmus"},
-        {"title": "Trigonometrie", "latex": r"\sin(x),\; \cos(x),\; \tan(x)", "desc": "Trigonometrische Funktionen"},
-        {"title": "Betrag", "latex": r"|x|", "desc": "Betrag einer Zahl x"},
-        {"title": "Norm", "latex": r"\| \vec{x} \|", "desc": "Norm eines Vektors x"},
-        {"title": "Skalarprodukt", "latex": r"\langle \vec{a}, \vec{b} \rangle",
-         "desc": "Skalarprodukt zweier Vektoren"},
-        {"title": "Vektor", "latex": r"\vec{v} = \begin{pmatrix} v_1 \\ v_2 \\ v_3 \end{pmatrix}",
-         "desc": "Spaltenvektor mit drei Komponenten"},
-        {"title": "Matrix 2×2", "latex": r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}", "desc": "2×2-Matrix"},
-        {"title": "Lineares Gleichungssystem",
-         "latex": r"\begin{cases} a_1x + b_1y = c_1 \\ a_2x + b_2y = c_2 \end{cases}",
-         "desc": "Zweizeiliges Gleichungssystem"},
-        {"title": "Menge", "latex": r"\{ x \in \mathbb{R} \mid x > 0 \}",
-         "desc": "Menge aller positiven reellen Zahlen"},
-        {"title": "Vereinigung & Schnitt", "latex": r"A \cup B,\; A \cap B",
-         "desc": "Vereinigung und Schnitt zweier Mengen"},
-        {"title": "Wahrscheinlichkeit", "latex": r"P(A) = \frac{|A|}{|\Omega|}",
-         "desc": "Einfache Wahrscheinlichkeitsdefinition"},
-        {"title": "Erwartungswert", "latex": r"\mathbb{E}(X)", "desc": "Erwartungswert der Zufallsvariablen X"},
-        {"title": "Varianz", "latex": r"\mathrm{Var}(X) = \mathbb{E}\big[(X - \mathbb{E}(X))^2\big]",
-         "desc": "Varianz von X"},
-        {"title": "Binomialkoeffizient", "latex": r"\binom{n}{k}",
-         "desc": "Anzahl der Möglichkeiten, k aus n zu wählen"},
-        {"title": "Binomischer Lehrsatz", "latex": r"(a+b)^n = \sum_{k=0}^{n} \binom{n}{k} a^{n-k} b^{k}",
-         "desc": "Binomischer Lehrsatz"},
-        {"title": "Standardnormalverteilung", "latex": r"\varphi(x) = \frac{1}{\sqrt{2\pi}} e^{-\frac{x^2}{2}}",
-         "desc": "Dichte der Standardnormalverteilung"},
+        {"title": "Mitternachtsformel", "latex": r"\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}", "desc": "Quadratische Gleichung"},
+        {"title": "Ableitung", "latex": r"\frac{d}{dx} f(x)", "desc": "Ableitung"},
+        {"title": "Integral", "latex": r"\int_{a}^{b} f(x)\,dx", "desc": "Bestimmtes Integral"},
+        {"title": "Grenzwert", "latex": r"\lim_{x \to \infty} f(x)", "desc": "Grenzwert"},
+        {"title": "Matrix 2×2", "latex": r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}", "desc": "2×2 Matrix"},
     ]
 
     for f in formulas:
@@ -1586,15 +1396,13 @@ LaTeX ist besonders stark, wenn du:
         st.markdown("LaTeX-Code:")
         st.code(f["latex"], language="latex")
 
-
     st.markdown("---")
     st.info("Tipp: Inline-Formeln: `$ ... $`, Blockformeln: `\\[ ... \\]`")
 
 
 # -------------------------------------------------
-# 8️⃣ MOOD-TRACKER & STRESSRADAR
+# 8️⃣ MOOD-TRACKER & STRESSRADAR (STORE)
 # -------------------------------------------------
-
 elif page == "Mood-Tracker & Stressradar":
     st.title("🌟 Mood-Tracker & Stressradar")
 
@@ -1614,13 +1422,7 @@ elif page == "Mood-Tracker & Stressradar":
     notiz = st.text_area("Notiz (optional)", "")
 
     if st.button("Eintrag speichern"):
-        new_row = {
-            "datum": datum,
-            "stimmung": stimmung,
-            "stress": stress,
-            "schlaf": schlaf,
-            "notiz": notiz,
-        }
+        new_row = {"datum": datum, "stimmung": stimmung, "stress": stress, "schlaf": schlaf, "notiz": notiz}
         mood_df = pd.concat([mood_df, pd.DataFrame([new_row])], ignore_index=True)
         save_mood(mood_df)
         st.success("Eintrag gespeichert!")
@@ -1638,17 +1440,13 @@ elif page == "Mood-Tracker & Stressradar":
             st.line_chart(chart_data)
 
             st.markdown("### Letzte Einträge")
-            st.dataframe(last_days.tail(20))
+            st.dataframe(last_days.tail(20), use_container_width=True)
 
-        # 🔻 NEU: Eintrag löschen
         st.markdown("---")
         st.subheader("🗑️ Falschen Eintrag löschen")
 
-        # Kopie mit Original-Index merken, damit wir genau den richtigen Eintrag löschen können
-        mood_df_sorted = mood_df.sort_values("datum", ascending=False).reset_index()
-        mood_df_sorted = mood_df_sorted.rename(columns={"index": "orig_index"})
+        mood_df_sorted = mood_df.sort_values("datum", ascending=False).reset_index().rename(columns={"index": "orig_index"})
 
-        # Auswahl-Liste bauen
         options = [
             f"{row['datum'].strftime('%d.%m.%Y')} – Stimmung: {row['stimmung']}/10, "
             f"Stress: {row['stress']}/10, Schlaf: {row['schlaf']}h"
@@ -1661,14 +1459,10 @@ elif page == "Mood-Tracker & Stressradar":
         )
 
         if selected_label != "(kein Eintrag ausgewählt)":
-            # herausfinden, welche Zeile in mood_df_sorted das ist
             selected_idx = options.index(selected_label)
             row_to_delete = mood_df_sorted.iloc[selected_idx]
 
-            st.warning(
-                f"Du bist dabei, den Eintrag vom "
-                f"{row_to_delete['datum'].strftime('%d.%m.%Y')} zu löschen."
-            )
+            st.warning(f"Du bist dabei, den Eintrag vom {row_to_delete['datum'].strftime('%d.%m.%Y')} zu löschen.")
 
             if st.button("❌ Ausgewählten Eintrag wirklich löschen"):
                 orig_index = int(row_to_delete["orig_index"])
@@ -1686,20 +1480,11 @@ elif page == "Mood-Tracker & Stressradar":
         l_stimmung = latest["stimmung"]
 
         if l_stress >= 8 and l_schlaf <= 5:
-            st.error(
-                "Sehr hoher Stress und wenig Schlaf – Risiko für schlechte Lernleistung.\n\n"
-                "👉 Versuche heute bewusst Pausen zu machen, Handy wegzulegen und früher zu schlafen."
-            )
+            st.error("Sehr hoher Stress und wenig Schlaf.\n\n👉 Versuche heute bewusst Pausen zu machen & früher zu schlafen.")
         elif l_stress >= 7:
-            st.warning(
-                "Dein Stresslevel ist aktuell hoch.\n\n"
-                "👉 Plane kleine Pausen ein, geh kurz an die frische Luft oder mach 5 Minuten Stretching."
-            )
+            st.warning("Dein Stresslevel ist aktuell hoch.\n\n👉 Plane kleine Pausen ein.")
         elif l_stimmung <= 4:
-            st.info(
-                "Deine Stimmung ist etwas im Keller.\n\n"
-                "👉 Vielleicht hilft dir ein Spaziergang, Musik oder ein Gespräch mit Freunden."
-            )
+            st.info("Deine Stimmung ist etwas im Keller.\n\n👉 Vielleicht hilft Bewegung/Musik/reden.")
         else:
             st.success("Alles im grünen Bereich – gute Voraussetzungen fürs Lernen! 💪")
     else:

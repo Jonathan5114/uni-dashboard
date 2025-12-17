@@ -1,0 +1,52 @@
+{
+  "klausuren": [
+    {
+      "fach": "wrwerqerq3r",
+      "datum": "2025-12-26",
+      "lernordner": "",
+      "tage_vorher": 21,
+      "archiviert": false,
+      "note": "",
+      "ziel_stunden": 0.0,
+      "gelernt_stunden": 0.0
+    }
+  ],
+  "todos": [],
+  "seminare": [
+    {
+      "titel": "hola",
+      "datum": "2025-12-20",
+      "uhrzeit1": "10:00-12:00",
+      "datum2": "",
+      "uhrzeit2": "",
+      "notiz": "WICHTIG",
+      "punkte": 1.0,
+      "absolviert": false
+    }
+  ],
+  "lernplan": [],
+  "mood": [
+    {
+      "datum": "2025-12-17",
+      "stimmung": 7,
+      "stress": 5,
+      "schlaf": 7.0,
+      "notiz": "2rrrqrq"
+    },
+    {
+      "datum": "2025-12-18",
+      "stimmung": 7,
+      "stress": 5,
+      "schlaf": 7.0,
+      "notiz": "2rrrqrq"
+    },
+    {
+      "datum": "2025-12-19",
+      "stimmung": 4,
+      "stress": 9,
+      "schlaf": 4.0,
+      "notiz": "2rrrqrq"
+    }
+  ],
+  "stundenplan_html": ""
+}
